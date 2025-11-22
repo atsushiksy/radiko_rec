@@ -8,6 +8,7 @@ import subprocess
 import threading
 import os
 from datetime import datetime, timedelta
+import queue
 
 # --- 設定と定数 ---
 
@@ -117,8 +118,8 @@ class RadikoAuth:
         # エリアIDは応答ボディに含まれる
         try:
             # XML応答からエリアIDを抽出する (簡易的な処理)
-            area_id_match = res2.text.split('<area_id>').[1]split('</area_id>')
-            self.area_id = area_id_match
+            area_id_part = res2.text.split('<area_id>')[1].split('</area_id>')[0]
+            self.area_id = area_id_part.strip()
             self.log(f"Auth2成功: エリアID '{self.area_id}' を取得しました。")
             return True
         except IndexError:
@@ -201,25 +202,45 @@ class RadikoMetadata:
         
         today = datetime.now().strftime('%Y%m%d')
         if date_str == today:
-            programs =
+            # 仮の今日用データ
+            programs = [
+                {
+                    "title": "モーニングショー",
+                    "start_time": datetime(int(date_str[:4]), int(date_str[4:6]), int(date_str[6:]), 9, 0, 0),
+                    "duration": 60,
+                },
+                {
+                    "title": "夕方ワイド",
+                    "start_time": datetime(int(date_str[:4]), int(date_str[4:6]), int(date_str[6:]), 17, 0, 0),
+                    "duration": 120,
+                },
+            ]
         else:
             programs = [
-                {"title": "過去のスペシャル", "start_time": datetime(int(date_str[:4]), int(date_str[4:6]), int(date_str[6:]), 10, 0, 0), "duration": 90},
-                {"title": "深夜のトークセッション", "start_time": datetime(int(date_str[:4]), int(date_str[4:6]), int(date_str[6:]), 22, 0, 0), "duration": 60},
+                {
+                    "title": "過去のスペシャル",
+                    "start_time": datetime(int(date_str[:4]), int(date_str[4:6]), int(date_str[6:]), 10, 0, 0),
+                    "duration": 90,
+                },
+                {
+                    "title": "深夜のトークセッション",
+                    "start_time": datetime(int(date_str[:4]), int(date_str[4:6]), int(date_str[6:]), 22, 0, 0),
+                    "duration": 60,
+                },
             ]
-            
-        # ダウンロード処理に必要なYYMMDDHHMMSS形式に変換
-        program_data =
-        for p in programs:
-            end_time = p['start_time'] + timedelta(minutes=p['duration'])
-            program_data.append({
-                "title": p['title'],
-                "start_time_dt": p['start_time'],
-                "end_time_dt": end_time,
-                "start_time_str": p['start_time'].strftime('%Y%m%d%H%M%S'),
-                "end_time_str": end_time.strftime('%Y%m%d%H%M%S'),
-            })
 
+        program_data = []
+        for p in programs:
+            end_time = p["start_time"] + timedelta(minutes=p["duration"])
+            program_data.append(
+                {
+                    "title": p["title"],
+                    "start_time_dt": p["start_time"],
+                    "end_time_dt": end_time,
+                    "start_time_str": p["start_time"].strftime("%Y%m%d%H%M%S"),
+                    "end_time_str": end_time.strftime("%Y%m%d%H%M%S"),
+                }
+            )
         return program_data
 
 
@@ -297,9 +318,9 @@ class StreamDownloader:
             # subprocess.Popen でプロセスを起動し、非同期で実行する
             self.process = subprocess.Popen(
                 ffmpeg_command,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                universal_newlines=True # 標準入出力をテキストモードで処理
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,  # エラーだけ取りたいならこのままでもOK
+                universal_newlines=True
             )
             
             # ダウンロード進捗の監視を開始
@@ -368,7 +389,7 @@ class RadikoGUI:
         master.title("Radiko Time-Free 高速ダウンローダー")
         
         # ログメッセージをGUIに表示するためのスレッドセーフなキュー
-        self.log_queue = 
+        self.log_queue = queue.Queue()
 
         # モデル層の初期化
         self.auth = RadikoAuth(self.add_log)
@@ -471,19 +492,16 @@ class RadikoGUI:
     # --- Controller/Thread管理メソッド ---
 
     def add_log(self, message):
-        """スレッドセーフなログ追加。メインスレッドで処理されるようキューに入れる。"""
-        timestamp = datetime.now().strftime('')
-        self.log_queue.append(f"{timestamp} {message}\n")
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        self.log_queue.put(f"{timestamp} {message}\n")
 
     def _process_log_queue(self):
-        """メインスレッドでキューからログを取り出し、Textウィジェットに表示する。"""
-        if self.log_queue:
-            self.log_text.config(state='normal')
-            for log_entry in self.log_queue:
-                self.log_text.insert(tk.END, log_entry)
-            self.log_text.see(tk.END)
-            self.log_text.config(state='disabled')
-            self.log_queue.clear()
+        self.log_text.config(state='normal')
+        while not self.log_queue.empty():
+            log_entry = self.log_queue.get()
+            self.log_text.insert(tk.END, log_entry)
+        self.log_text.see(tk.END)
+        self.log_text.config(state='disabled')
         self.master.after(100, self._process_log_queue)
 
     def _start_auth_thread(self):
@@ -517,7 +535,7 @@ class RadikoGUI:
             self.station_dropdown['values'] = station_names
             self.station_dropdown.config(state='readonly')
             if station_names:
-                self.station_var.set(station_names)
+                self.station_var.set(station_names[0])
                 self._load_programs()
         else:
             messagebox.showerror("認証失敗", "Radiko認証に失敗しました。ログを確認してください。")
@@ -580,7 +598,7 @@ class RadikoGUI:
             return
         
         # 選択された番組データを取得
-        program_index = selected_index
+        program_index = selected_index[0]
         program = self.program_data[program_index]
         station_name = self.station_var.get()
         station_id = next((k for k, v in self.station_vars.items() if v == station_name), None)
