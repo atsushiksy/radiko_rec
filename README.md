@@ -84,3 +84,15 @@ FFmpegへの入力は、認証トークンがHTTPヘッダとして付与され�
 | `-acodec copy` | ストリームを再エンコードせずにコピーし、CPU負荷を劇的に下げ、処理速度を向上させる [1]。 |
 | `-bsf:a aac_adtstoasc` | RadikoストリームのADTSヘッダをMP4/M4A互換のASC形式に変換する。コピーモードでのM4A出力に必須 [1]。 |
 | `-loglevel error` | FFmpegの冗長なコンソール出力を抑制し、I/O集中を可能にする [1]。 |
+
+## Mac 上で動かすときの注意点
+
+### 必須環境
+  1\.  Python 3 + Tkinter が使える環境
+  • macOS の「システム Python」は古かったり Tk が不安定なことがあるので、
+  • できれば [python.org の公式インストーラ版 Python 3.x] か brew install python で入れた Python を使うと安心です。
+  • Tkinter は通常付属しますが、import tkinter でエラーが出たら環境を見直し。
+  2\.  requests のインストール
+    python3 -m pip install requests
+  3\.  FFmpeg が PATH にあること
+    brew install ffmpeg

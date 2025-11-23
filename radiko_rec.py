@@ -9,12 +9,13 @@ import threading
 import os
 from datetime import datetime, timedelta
 import queue
+import xml.etree.ElementTree as ET
 
 # --- 設定と定数 ---
 
 # Radiko認証に使用される静的な秘密鍵 (rec_radiko_tsから引用された値のバイト表現)
 # 認証プロトコルの核心部分であり、正確性が要求されます。
-AUTHKEY_VALUE = b"vL0XNja/8qJ7D2qEQ1FwQjL/bC4B0eDk" 
+AUTHKEY_VALUE = b"bcd151073c03b352e1ef2fd66c32209da9ca0afa"
 
 # Radiko API エンドポイント
 URL_AUTH1 = "https://radiko.jp/v2/api/auth1"
@@ -34,6 +35,7 @@ class RadikoAuth:
         self.area_id = None
         self.radiko_session = None
         self.log = log_callback
+        self.session = requests.Session()
 
     def _generate_partial_key(self, keyoffset, keylength):
         """
@@ -66,14 +68,18 @@ class RadikoAuth:
                 return False
         
         # 1. Auth1: AuthToken, KeyOffset, KeyLengthの取得
+    # Auth1
         auth1_headers = {
+            "User-Agent": "curl/7.52.1",
+            "Accept": "*/*",
             "X-Radiko-App": "pc_html5",
             "X-Radiko-App-Version": "0.0.1",
             "X-Radiko-Device": "pc",
-            "X-Radiko-User": "dummy_user"
+            "X-Radiko-User": "dummy_user",
         }
+
         try:
-            res1 = requests.get(URL_AUTH1, headers=auth1_headers, timeout=5)
+            res1 = self.session.get(URL_AUTH1, headers=auth1_headers, timeout=5)
             res1.raise_for_status()
         except requests.RequestException as e:
             self.log(f"エラー: Auth1リクエストに失敗しました: {e} ")
@@ -97,11 +103,16 @@ class RadikoAuth:
 
         # 2. Auth2: PartialKeyとAuthTokenを送信し、エリアIDを取得
         auth2_headers = {
+            "User-Agent": "curl/7.52.1",
+            "Accept": "*/*",
             "X-Radiko-Device": "pc",
             "X-Radiko-User": "dummy_user",
+            "X-Radiko-App": "pc_html5",
+            "X-Radiko-App-Version": "0.0.1",
             "X-Radiko-AuthToken": self.authtoken,
-            "X-Radiko-PartialKey": partial_key
+            "X-Radiko-PartialKey": partial_key,
         }
+
         
         # Premiumセッションがある場合はURLにクエリパラメータを追加 
         auth2_url = URL_AUTH2
@@ -109,45 +120,51 @@ class RadikoAuth:
             auth2_url += f"?radiko_session={self.radiko_session}"
 
         try:
-            res2 = requests.get(auth2_url, headers=auth2_headers, timeout=5)
+            res2 = self.session.get(auth2_url, headers=auth2_headers, timeout=5)
             res2.raise_for_status()
         except requests.RequestException as e:
             self.log(f"エラー: Auth2リクエストに失敗しました: {e} ")
             return False
 
-        # エリアIDは応答ボディに含まれる
-        try:
-            # XML応答からエリアIDを抽出する (簡易的な処理)
-            area_id_part = res2.text.split('<area_id>')[1].split('</area_id>')[0]
-            self.area_id = area_id_part.strip()
-            self.log(f"Auth2成功: エリアID '{self.area_id}' を取得しました。")
-            return True
-        except IndexError:
+        # エリアIDは応答ボディに含まれる（CSV風テキスト）
+        body = res2.text.strip()
+        # デバッグしたくなったらコメントアウトを外す
+        self.log(f"Auth2レスポンス: {body}")
+
+        # OUT または空文字はエリア判定失敗
+        if not body or body == "OUT":
+            self.log("エラー: Auth2でエリアが判定されませんでした。(レスポンスが空 or OUT)")
+            return False
+
+        # 1行目を取り出してカンマ区切りの先頭要素が area_id
+        first_line = body.splitlines()[0]
+        self.area_id = first_line.split(",")[0].strip()
+
+        if not self.area_id:
             self.log("エラー: Auth2応答ボディからエリアIDが抽出できませんでした。")
             return False
+
+        self.log(f"Auth2成功: エリアID '{self.area_id}' を取得しました。")
+        return True
             
     def _premium_login(self, mail, password):
         """Radiko Premiumログインを実行し、radiko_sessionを取得する """
-        login_data = {
-            "mail": mail,
-            "pass": password
-        }
+        login_data = {"mail": mail, "pass": password}
         try:
-            res = requests.post(URL_PREMIUM_LOGIN, data=login_data, timeout=5)
+            res = self.session.post(URL_PREMIUM_LOGIN, data=login_data, timeout=5)
             res.raise_for_status()
-            
-            # 応答JSONからセッション情報を抽出 
+
             data = res.json()
             self.radiko_session = data.get("radiko_session")
             areafree = data.get("areafree")
 
             if self.radiko_session and areafree == "1":
                 self.log("Premiumログインに成功しました。エリアフリー録音が可能です。")
+                # cookie は self.session.cookies に自動で入っている
                 return True
             else:
                 self.log("エラー: Premiumログインに失敗しました。認証情報をご確認ください。")
                 return False
-
         except Exception as e:
             self.log(f"エラー: Premiumログイン中に例外が発生しました: {e} ")
             return False
@@ -165,84 +182,79 @@ class RadikoAuth:
             finally:
                 self.radiko_session = None
         
+import xml.etree.ElementTree as ET
+
 class RadikoMetadata:
-    """
-    放送局リストと番組表を取得するクラス。
-    非公式APIロジックを再現するために、シンプルなモックデータを使用する。
-    実際の運用では、Radikoの非公開/非公式APIに依存する [2]。
-    """
     def __init__(self, auth, log_callback):
         self.auth = auth
         self.log = log_callback
-        # 実際の運用では、認証後にAPIから動的に取得する必要がある
         self.STATIONS = {
             "TBS": "TBSラジオ",
             "QRR": "文化放送",
             "LFR": "ニッポン放送",
             "RN1": "ラジオNIKKEI第1",
-            "FMJ": "J-WAVE"
+            "FMJ": "J-WAVE",
+            # 必要に応じて追加
         }
-        
+
     def get_stations(self):
-        """認証情報に基づいて利用可能な放送局リストを返す"""
-        # 認証ロジックがエリアIDに基づくフィルタリングを行うが、ここではモックリストを返す
         return self.STATIONS
 
     def get_programs(self, station_id, date_str):
         """
-        指定した局と日付の番組表を返す。
-        実際のAPI応答の構造を模倣したデータ構造 [2]。
-        date_str: 'YYYYMMDD'形式
+        Radiko公式の番組表APIから、指定局・指定日の番組一覧を取得する。
+        date_str: 'YYYYMMDD'
         """
         if station_id not in self.STATIONS:
-            return
+            self.log(f"警告: 未知の局IDが指定されました: {station_id}")
+            return []
 
-        # タイムフリー APIの応答を模倣したモックデータ
-        # 実際にはURL_PROGS_DATEなどのエンドポイントからJSON/XMLを取得する [2]
-        
-        today = datetime.now().strftime('%Y%m%d')
-        if date_str == today:
-            # 仮の今日用データ
-            programs = [
-                {
-                    "title": "モーニングショー",
-                    "start_time": datetime(int(date_str[:4]), int(date_str[4:6]), int(date_str[6:]), 9, 0, 0),
-                    "duration": 60,
-                },
-                {
-                    "title": "夕方ワイド",
-                    "start_time": datetime(int(date_str[:4]), int(date_str[4:6]), int(date_str[6:]), 17, 0, 0),
-                    "duration": 120,
-                },
-            ]
-        else:
-            programs = [
-                {
-                    "title": "過去のスペシャル",
-                    "start_time": datetime(int(date_str[:4]), int(date_str[4:6]), int(date_str[6:]), 10, 0, 0),
-                    "duration": 90,
-                },
-                {
-                    "title": "深夜のトークセッション",
-                    "start_time": datetime(int(date_str[:4]), int(date_str[4:6]), int(date_str[6:]), 22, 0, 0),
-                    "duration": 60,
-                },
-            ]
+        url = f"https://radiko.jp/v3/program/station/date/{date_str}/{station_id}.xml"
+        self.log(f"番組表APIにアクセス: {url}")
+
+        try:
+            # 認証用セッションがあるならそれを使う（Cookie共有）
+            session = self.auth.session if getattr(self.auth, "session", None) else requests
+            res = session.get(url, timeout=10)
+            res.raise_for_status()
+        except requests.RequestException as e:
+            self.log(f"エラー: 番組表取得に失敗しました: {e}")
+            return []
+
+        try:
+            root = ET.fromstring(res.content)
+        except ET.ParseError as e:
+            self.log(f"エラー: 番組表XMLの解析に失敗しました: {e}")
+            return []
 
         program_data = []
-        for p in programs:
-            end_time = p["start_time"] + timedelta(minutes=p["duration"])
+        # //prog ノードを全部拾う
+        for p in root.findall(".//prog"):
+            ft = p.attrib.get("ft")  # 例: '20240521050000'
+            to = p.attrib.get("to")
+            title = p.findtext("title", default="(タイトル不明)")
+
+            if not ft or not to:
+                continue
+
+            try:
+                start_dt = datetime.strptime(ft, "%Y%m%d%H%M%S")
+                end_dt   = datetime.strptime(to, "%Y%m%d%H%M%S")
+            except ValueError:
+                continue
+
             program_data.append(
                 {
-                    "title": p["title"],
-                    "start_time_dt": p["start_time"],
-                    "end_time_dt": end_time,
-                    "start_time_str": p["start_time"].strftime("%Y%m%d%H%M%S"),
-                    "end_time_str": end_time.strftime("%Y%m%d%H%M%S"),
+                    "title": title,
+                    "start_time_dt": start_dt,
+                    "end_time_dt": end_dt,
+                    "start_time_str": ft,
+                    "end_time_str": to,
                 }
             )
-        return program_data
 
+        self.log(f"番組表取得: {len(program_data)} 件")
+        return program_data
 
 class StreamDownloader:
     """
@@ -299,17 +311,26 @@ class StreamDownloader:
         # FFmpegコマンドの構築
         # 認証トークンは -headers オプションで渡す 
         # -acodec copy と -bsf:a aac_adtstoasc は高速化とM4A互換性のために必須 
+        # FFmpeg用ヘッダ（Authtoken + AreaId）
+        header_lines = [
+            f"X-Radiko-Authtoken: {self.auth.authtoken}",
+        ]
+        if self.auth.area_id:
+            header_lines.append(f"X-Radiko-AreaId: {self.auth.area_id}")
+        
+        headers_str = "\r\n".join(header_lines) + "\r\n"
+        
         ffmpeg_command = [
             "ffmpeg",
-            "-loglevel", "error", # 冗長な出力を抑制し、高速化に寄与 
+            "-loglevel", "error",
             "-fflags", "+discardcorrupt",
-            "-headers", f"X-Radiko-Authtoken: {self.auth.authtoken}",
+            "-headers", headers_str,
             "-i", m3u8_url,
             "-acodec", "copy",
             "-vn",
             "-bsf:a", "aac_adtstoasc",
-            "-y", # 上書き許可 
-            output_path
+            "-y",
+            output_path,
         ]
         
         self.log(f"FFmpegで録音を開始: {output_path}")
