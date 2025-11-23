@@ -88,11 +88,13 @@ FFmpegへの入力は、認証トークンがHTTPヘッダとして付与され�
 ## Mac 上で動かすときの注意点
 
 ### 必須環境
-  1\.  Python 3 + Tkinter が使える環境
-  • macOS の「システム Python」は古かったり Tk が不安定なことがあるので、
-  • できれば [python.org の公式インストーラ版 Python 3.x] か brew install python で入れた Python を使うと安心です。
-  • Tkinter は通常付属しますが、import tkinter でエラーが出たら環境を見直し。
-  2\.  requests のインストール
+  1.  Python 3 + Tkinter が使える環境
+  macOS の「システム Python」は古かったり Tk が不安定なことがあるので、できれば **[python.org の公式インストーラ版 Python 3.x]** か **brew install python** で入れた Python を使うと安心です。Tkinter は通常付属しますが、import tkinter でエラーが出たら環境を見直し。
+  2.  requests のインストール
+```bash
     python3 -m pip install requests
-  3\.  FFmpeg が PATH にあること
+```
+  3.  FFmpeg が PATH にあること
+```bash
     brew install ffmpeg
+```
