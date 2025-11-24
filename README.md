@@ -74,6 +74,12 @@ password: passme
 
 ## 技術的詳細（開発者向け）
 
+### 参考コード
+本コードは、以下のrepoを参考に、AIを駆使して作成されました。このREADME.mdも大部分がAIによって生成されています。
+
+GitHub - uru2/rec_radiko_ts: Radiko timefree program recorder, accessed November 22, 2025, https://github.com/uru2/rec_radiko_ts
+inkch/radiko-api: api wrapper for Radiko's programs - GitHub, accessed November 22, 2025, https://github.com/inkch/radiko-api
+
 ### 認証ロジックの再現
 
 本プログラムは、シェルスクリプトが行っていた複雑な認証手順をPythonネイティブに再現しています。
@@ -104,3 +110,8 @@ FFmpegへの入力は、認証トークンがHTTPヘッダとして付与され�
 ```bash
     brew install ffmpeg
 ```
+
+### ライセンス
+
+  MIT
+
