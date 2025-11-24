@@ -10,6 +10,7 @@ import os
 from datetime import datetime, timedelta
 import queue
 import xml.etree.ElementTree as ET
+import yaml
 
 # --- 設定と定数 ---
 
@@ -319,7 +320,7 @@ class StreamDownloader:
             header_lines.append(f"X-Radiko-AreaId: {self.auth.area_id}")
         
         headers_str = "\r\n".join(header_lines) + "\r\n"
-        
+
         ffmpeg_command = [
             "ffmpeg",
             "-loglevel", "error",
@@ -427,6 +428,44 @@ class RadikoGUI:
         # アプリケーション終了時にログアウト処理を確実に実行
         master.protocol("WM_DELETE_WINDOW", self._on_closing)
 
+    def _load_login_from_yaml(self):
+        """
+        プログラムと同じディレクトリにある login.yaml から
+        mail / password を読み込んで入力欄を初期化する。
+        ファイルが無い・読めない場合は何もしない。
+        """
+        try:
+            # このファイルと同じディレクトリにある login.yaml を探す
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+            yaml_path = os.path.join(base_dir, "login.yaml")
+
+            if not os.path.exists(yaml_path):
+                # 無ければ何もしない
+                self.add_log("login.yaml が見つからないため、認証情報の自動設定は行いません。")
+                return
+
+            mail = None
+            password = None
+
+            with open(yaml_path, encoding="utf-8") as f:
+                cfg = yaml.safe_load(f)
+            mail = cfg.get("mail")
+            password = cfg.get("password")
+
+            # 読み込めたものだけ反映
+            if mail:
+                self.mail_entry.delete(0, tk.END)
+                self.mail_entry.insert(0, mail)
+            if password:
+                self.pass_entry.delete(0, tk.END)
+                self.pass_entry.insert(0, password)
+
+            self.add_log("login.yaml から認証情報を初期化しました。")
+
+        except Exception as e:
+            # 読み取り失敗しても致命的ではないのでログだけ残す
+            self.add_log(f"警告: login.yaml 読み込み中にエラーが発生しました: {e}")
+
     def _create_widgets(self, master):
         # メインフレーム
         main_frame = ttk.Frame(master, padding="10")
@@ -509,7 +548,9 @@ class RadikoGUI:
         select_frame.columnconfigure(1, weight=1)
         download_frame.columnconfigure(1, weight=1)
         log_frame.columnconfigure(0, weight=1)
-
+        
+        # login.yaml があれば、メール・パスワードを自動入力
+        self._load_login_from_yaml()
     # --- Controller/Thread管理メソッド ---
 
     def add_log(self, message):
