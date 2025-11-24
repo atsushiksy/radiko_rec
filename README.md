@@ -77,8 +77,8 @@ password: passme
 ### 参考コード
 本コードは、以下のrepoを参考に、AIを駆使して作成されました。このREADME.mdも大部分がAIによって生成されています。
 
-GitHub - uru2/rec_radiko_ts: Radiko timefree program recorder, accessed November 22, 2025, https://github.com/uru2/rec_radiko_ts
-inkch/radiko-api: api wrapper for Radiko's programs - GitHub, accessed November 22, 2025, https://github.com/inkch/radiko-api
+1.  GitHub - uru2/rec_radiko_ts: Radiko timefree program recorder, https://github.com/uru2/rec_radiko_ts
+2.  inkch/radiko-api: api wrapper for Radiko's programs, https://github.com/inkch/radiko-api
 
 ### 認証ロジックの再現
 
